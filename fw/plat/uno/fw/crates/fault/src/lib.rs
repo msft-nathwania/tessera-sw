@@ -496,6 +496,40 @@ extern "C" fn collect_crash_dump_tcon_irq(ef: &ExceptionFrame) -> ! {
     halt();
 }
 
+/// RNG hardware health-test alarm (IRQ26, `drivers/pac` `__INTERRUPTS[26]`).
+///
+/// Raised when the TRBG/DRBG continuous health tests (repetition count,
+/// adaptive proportion, chi-square) or the DRBG detect a fault. Mirrors the
+/// reference `rng_error_irq`: mask this line and the wakeup1 receiver, log
+/// the fault code, record a [`FailureCode::RngSelfTestFailure`] dump, signal
+/// the SP through Mailbox0, and halt. Like the reference, it does not fire
+/// wakeup1 at the peer; the SP drives device-wide recovery from its error
+/// state.
+///
+/// Being NVIC-vectored, it preempts the synchronous RNG read loop, whose
+/// reset/retry policy would otherwise mask the fault.
+///
+/// # ABI
+///
+/// Linked by symbol name from the PAC vector table; never call it directly.
+#[no_mangle]
+pub extern "C" fn RNG_ERROR() {
+    Nvic::disable(Interrupt::RNG_ERROR);
+    Nvic::disable(Interrupt::TCON_WAKEUP1);
+    error!(
+        "rng",
+        HsmError::RngError,
+        "RNG Hardware error received. Fault code: {}",
+        FailureCode::RngSelfTestFailure as u32
+    );
+    crashdump_save(
+        &capture_register_context(),
+        FailureCode::RngSelfTestFailure,
+        None,
+    );
+    enter_error_state(HsmError::RngError)
+}
+
 /// Catch-all handler for any exception/interrupt without a dedicated
 /// handler. Reports the offending exception number so an unexpected or
 /// spurious interrupt is no longer silent, then halts.

@@ -1536,6 +1536,12 @@ impl HsmPal for UnoHsmPal {
             unsafe { tsra_fw_uno_drivers_pqc::map_mailbox_normal() };
         }
         self.rng.init();
+        // Arm the RNG health-test alarm right after calibration, mirroring
+        // the reference `Rng::new` → clear → enable sequence. A deliberate
+        // boot-time negative health test (validation builds) faults here,
+        // before any RNG consumer or the Admin handshake.
+        Nvic::unpend(Interrupt::RNG_ERROR);
+        Nvic::enable(Interrupt::RNG_ERROR);
         self.ipc.init();
         // Zero the indices of the HSM→Admin queue this core produces into.
         // Mirrors the reference `hsm_to_admin_ipc_channel_config`, which

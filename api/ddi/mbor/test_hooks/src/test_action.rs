@@ -26,7 +26,7 @@ pub enum TestActionRequest {
     PinPolicyOverride(DdiTestActionPinPolicyConfig),
     PinPolicyClear,
     ForcePkaInstance(Option<u8>),
-    TriggerRngHwFailure,
+    TriggerRngHwFailure(u32),
     ToggleFipsApprovedState,
     TriggerNegativePctFailure(u8),
     TriggerEccError(DdiTestActionEccErrorInfo),
@@ -45,6 +45,7 @@ trait TestActionPayload: MborEncode {}
 
 impl TestActionPayload for DdiTestActionCrashReqInfo {}
 impl TestActionPayload for DdiTestActionNegativeSelfTestReqInfo {}
+impl TestActionPayload for DdiTestActionRngHwFailureReqInfo {}
 impl TestActionPayload for DdiTestActionPinPolicyConfig {}
 impl TestActionPayload for DdiTestActionForcePkaInstanceReqInfo {}
 impl TestActionPayload for DdiTestActionNegativePctFailureReqInfo {}
@@ -100,7 +101,12 @@ impl TryFrom<TestActionRequest> for DdiTestActionReq {
                     .transpose()?;
                 (DdiTestAction::ForcePkaInstance, payload)
             }
-            TestActionRequest::TriggerRngHwFailure => (DdiTestAction::TriggerRngHwFailure, None),
+            TestActionRequest::TriggerRngHwFailure(value) => (
+                DdiTestAction::TriggerRngHwFailure,
+                Some(encode_test_action_payload(
+                    &DdiTestActionRngHwFailureReqInfo { neg_test_id: value },
+                )?),
+            ),
             TestActionRequest::ToggleFipsApprovedState => {
                 (DdiTestAction::ToggleFipsApprovedState, None)
             }
@@ -204,6 +210,7 @@ mod tests {
                 lockout_delay: None,
             }),
             TestActionRequest::ForcePkaInstance(Some(1)),
+            TestActionRequest::TriggerRngHwFailure(0),
             TestActionRequest::TriggerNegativePctFailure(1),
             TestActionRequest::TriggerEccError(DdiTestActionEccErrorInfo {
                 ecc_error_type: DdiTestActionEccErrorType::DtcmDoubleBit,
@@ -248,6 +255,20 @@ mod tests {
             let mut decoder = MborDecoder::new(wire.payload.as_slice(), false);
             let payload = DdiTestActionNegativeSelfTestReqInfo::mbor_decode(&mut decoder)
                 .expect("negative self-test payload must decode");
+            assert_eq!(payload.neg_test_id, id);
+            assert_eq!(decoder.position(), wire.payload.len());
+        }
+    }
+
+    #[test]
+    fn rng_hw_failure_selector_round_trips_through_the_action_payload() {
+        for id in [0, 1, 2, u32::MAX] {
+            let wire = DdiTestActionReq::try_from(TestActionRequest::TriggerRngHwFailure(id))
+                .expect("RNG hardware failure request must encode");
+            assert_eq!(wire.action, DdiTestAction::TriggerRngHwFailure);
+            let mut decoder = MborDecoder::new(wire.payload.as_slice(), false);
+            let payload = DdiTestActionRngHwFailureReqInfo::mbor_decode(&mut decoder)
+                .expect("RNG hardware failure payload must decode");
             assert_eq!(payload.neg_test_id, id);
             assert_eq!(decoder.position(), wire.payload.len());
         }

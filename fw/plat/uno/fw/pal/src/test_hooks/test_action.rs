@@ -12,9 +12,7 @@
 use tsra_fw_ddi_mbor::MborDecode;
 use tsra_fw_ddi_mbor::MborDecoder;
 use tsra_fw_ddi_mbor::MborMap;
-#[cfg(feature = "tsra_test_hooks")]
 use tsra_fw_ddi_mbor_derive::Ddi;
-#[cfg(feature = "tsra_test_hooks")]
 use tsra_fw_hsm_pal_traits::HsmAlloc;
 use tsra_fw_hsm_pal_traits::HsmDmaBuf;
 use tsra_fw_hsm_pal_traits::HsmError;
@@ -23,9 +21,7 @@ use tsra_fw_hsm_pal_traits::HsmResult;
 #[cfg(feature = "tsra_test_hooks")]
 use super::clear_user_credentials;
 use super::common::ReqHdr;
-#[cfg(feature = "tsra_test_hooks")]
 use super::common::encode_resp;
-#[cfg(feature = "tsra_test_hooks")]
 use super::common::success_hdr;
 #[cfg(feature = "fips_validation_hooks")]
 use super::get_priv_key;
@@ -37,6 +33,8 @@ use super::negative_self_test;
 use super::raw_key_import;
 #[cfg(feature = "tsra_test_hooks")]
 use super::trigger_crash;
+#[cfg(feature = "fips_validation_hooks")]
+use super::trigger_rng_hw_failure;
 use crate::UnoHsmIo;
 use crate::pal::UnoHsmPal;
 
@@ -46,7 +44,6 @@ use crate::pal::UnoHsmPal;
 pub(super) const TEST_ACTION_PAYLOAD_MAX: usize = 3584;
 
 /// The response data shared by `TestAction` variants.
-#[cfg(feature = "tsra_test_hooks")]
 #[derive(Debug, Ddi)]
 #[ddi(map)]
 struct DdiTestActionResp {
@@ -66,6 +63,9 @@ enum SupportedTestAction {
     /// Run a periodic CAST now; it fails only with `fips_validation_hooks`.
     #[cfg(feature = "tsra_test_hooks")]
     ExecuteNegativeSelfTest = 9,
+    /// Force an RNG RCT/APT continuous health-test failure.
+    #[cfg(feature = "fips_validation_hooks")]
+    TriggerRngHwFailure = 13,
     /// Inject a crash into the HSM/Admin/FP cores.
     #[cfg(feature = "tsra_test_hooks")]
     TriggerCrash = 8,
@@ -107,6 +107,10 @@ impl TryFrom<u32> for SupportedTestAction {
         #[cfg(feature = "tsra_test_hooks")]
         if value == Self::ClearUserCredentials as u32 {
             return Ok(Self::ClearUserCredentials);
+        }
+        #[cfg(feature = "fips_validation_hooks")]
+        if value == Self::TriggerRngHwFailure as u32 {
+            return Ok(Self::TriggerRngHwFailure);
         }
         #[cfg(feature = "fips_validation_hooks")]
         if value == Self::GetPrivKey as u32 {
@@ -166,6 +170,15 @@ pub(super) async fn dispatch<'p>(
                 .map(|never| match never {})
         }
         #[cfg(feature = "fips_validation_hooks")]
+        SupportedTestAction::TriggerRngHwFailure => trigger_rng_hw_failure::dispatch(
+            pal,
+            io,
+            hdr,
+            decoder,
+            selector.request_field_count,
+            request_len,
+        ),
+        #[cfg(feature = "fips_validation_hooks")]
         SupportedTestAction::GetPrivKey => {
             let payload = decode_payload_bytes(decoder, selector.request_field_count, request_len)?;
             let payload_len = payload.len();
@@ -213,7 +226,6 @@ fn decode_action_selector(decoder: &mut MborDecoder<'_>) -> HsmResult<TestAction
 /// Validates the shared outer `{1: action, 2: payload}` request shape,
 /// enforces the payload bound, and requires complete consumption of both
 /// the outer request and the nested MBOR payload.
-#[cfg(feature = "tsra_test_hooks")]
 pub(super) fn decode_payload<'a, T>(
     decoder: &mut MborDecoder<'a>,
     request_field_count: u8,
@@ -277,7 +289,6 @@ fn decode_payload_bytes<'a>(
 }
 
 /// Encode a successful action response with no action-specific result.
-#[cfg(feature = "tsra_test_hooks")]
 pub(super) fn encode_success<'p>(
     pal: &'p UnoHsmPal,
     io: &UnoHsmIo,

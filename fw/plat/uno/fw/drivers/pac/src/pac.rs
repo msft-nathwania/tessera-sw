@@ -67,6 +67,13 @@ pub mod interrupt {
         #[allow(non_camel_case_types)]
         SHA_ERROR = 24,
 
+        /// RNG hardware health-test error (IRQ26, ISPR0 bit 26). Raised by
+        /// the TRBG/DRBG continuous health tests (RCT, APT, chi-square,
+        /// DRBG fault). NVIC-vectored to the fatal handler in
+        /// `tsra_fw_uno_fault` so it preempts any running code.
+        #[allow(non_camel_case_types)]
+        RNG_ERROR = 26,
+
         /// PKA engine Done interrupts (IRQ32–47, ISPR1 bits 0–15).
         #[allow(non_camel_case_types)]
         UPKA_0_DONE = 32,
@@ -172,6 +179,7 @@ extern "C" {
     fn AES_DONE();
     fn SHA_DONE();
     fn TCON_WAKEUP1();
+    fn RNG_ERROR();
 }
 
 /// Interrupt vector table — indexed by IRQ number.
@@ -191,6 +199,9 @@ pub static __INTERRUPTS: [Option<unsafe extern "C" fn()>; 224] = {
     // 89 = TCON_WAKEUP1 — cross-core crash-notify receiver (asm trampoline in
     // `tsra_fw_uno_fault`); NVIC-vectored so it preempts a spinning/halted core.
     table[89] = Some(TCON_WAKEUP1);
+    // 26 = RNG_ERROR — RNG health-test alarm (fatal handler in
+    // `tsra_fw_uno_fault`); NVIC-vectored so it preempts the RNG read loop.
+    table[26] = Some(RNG_ERROR);
     // 129 = INTC_IPC — polled, no ISR
     // 100/101 = IIC_ICQ_FP1/FP2, 107/108 = OIC_OCQ_FP1/FP2 — polled, no ISR
     table

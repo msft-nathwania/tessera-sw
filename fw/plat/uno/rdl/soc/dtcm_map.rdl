@@ -12,6 +12,7 @@
 //   0x2003_F400  CRASHDUMP_BASE     (1024 B)
 //   0x2003_F800  CORE_RUN_STATUS    (4 B)
 //   0x2003_F834  NEGATIVE_SELF_TEST_ID (4 B, shared with Admin at 0x6063_F834)
+//   0x2003_F87C  NEGATIVE_KIND      (4 B, shared with Admin at 0x6063_F87C)
 //
 // memory.x should set RAM LENGTH = 187K to prevent the linker from
 // placing .bss/stack into the reserved upper region.
@@ -72,6 +73,18 @@ reg negative_self_test_id_t {
     field { sw = rw; hw = na; } ID[31:0] = 0xFFFFFFFF;
 };
 
+reg negative_kind_t {
+    regwidth = 32;
+    name = "Negative Health Test Kind";
+    desc = "Validation-only boot RNG health-test fault (byte 0): 0 = none,
+            1 = repetition count (RCT), 2 = adaptive proportion (APT). Admin
+            clears it at boot and writes the SP pre-operational request at
+            global 0x6063_F87C; the HSM consumes it once before RNG
+            calibration and clears it. Bytes 1-3 are reserved.";
+    field { sw = rw; hw = na; } KIND[7:0] = 0x0;
+    field { sw = rw; hw = na; } RSVD[31:8] = 0x0;
+};
+
 
 // ══════════════════════════════════════════════════════════════
 // Address Map
@@ -100,4 +113,5 @@ addrmap hsm_dtcm {
     crashdump_base_t  CRASHDUMP_BASE    @ 0x3F400;
     core_run_status_t CORE_RUN_STATUS   @ 0x3F800;
     negative_self_test_id_t NEGATIVE_SELF_TEST_ID @ 0x3F834;
+    negative_kind_t   NEGATIVE_KIND     @ 0x3F87C;
 };

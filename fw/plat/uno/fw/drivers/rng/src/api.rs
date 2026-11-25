@@ -206,6 +206,98 @@ impl RngCalibration {
     };
 }
 
+/// APT cutoff that healthy entropy exceeds, forcing an APT failure.
+#[cfg(feature = "fips_validation_hooks")]
+const APT_FAULT_CUTOFF: u32 = 10;
+
+/// RCT cutoff that healthy entropy exceeds, forcing an RCT failure.
+#[cfg(feature = "fips_validation_hooks")]
+const REPCNT_FAULT_CUTOFF: u32 = 8;
+
+/// Reseed interval used while injecting a runtime health-test failure.
+#[cfg(feature = "fips_validation_hooks")]
+const FAULT_RESEED_INTERVAL: u32 = 2;
+
+/// Hardware continuous health test that a validation hook forces to fail.
+#[cfg(feature = "fips_validation_hooks")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RngHealthTest {
+    /// Adaptive proportion test.
+    Apt,
+    /// Repetition count test.
+    Rct,
+}
+
+#[cfg(feature = "fips_validation_hooks")]
+impl RngHealthTest {
+    /// Decodes the runtime `TriggerRngHwFailure` selector: 0 = APT, 1 = RCT.
+    ///
+    /// Not the boot negative-kind encoding (1 = RCT, 2 = APT).
+    pub fn from_runtime_selector(selector: u32) -> HsmResult<Self> {
+        match selector {
+            0 => Ok(Self::Apt),
+            1 => Ok(Self::Rct),
+            _ => Err(HsmError::InvalidArg),
+        }
+    }
+
+    /// Decodes the boot negative-kind byte: 1 = RCT, 2 = APT.
+    fn from_boot_kind(kind: u8) -> Option<Self> {
+        match kind {
+            BOOT_KIND_RCT => Some(Self::Rct),
+            BOOT_KIND_APT => Some(Self::Apt),
+            _ => None,
+        }
+    }
+
+    /// Returns `calibration` with this test's cutoff forced to fail.
+    fn apply(self, calibration: RngCalibration) -> RngCalibration {
+        match self {
+            Self::Apt => RngCalibration {
+                apt: APT_FAULT_CUTOFF,
+                ..calibration
+            },
+            Self::Rct => RngCalibration {
+                repcnt: REPCNT_FAULT_CUTOFF,
+                ..calibration
+            },
+        }
+    }
+}
+
+/// Boot negative-kind value requesting an RCT failure.
+#[cfg(feature = "fips_validation_hooks")]
+const BOOT_KIND_RCT: u8 = 1;
+
+/// Boot negative-kind value requesting an APT failure.
+#[cfg(feature = "fips_validation_hooks")]
+const BOOT_KIND_APT: u8 = 2;
+
+/// Consumes a boot negative RNG health test forwarded by Admin.
+///
+/// Admin clears the DTCM `NEGATIVE_KIND` word at boot and writes the kind
+/// from the SP pre-operational request at global `0x6063_F87C`, which is the
+/// HSM's local `0x2003_F87C`. Only byte 0 is meaningful. As in the reference,
+/// the byte is cleared only when it selects an RNG health test, so the next
+/// boot calibrates normally.
+#[cfg(feature = "fips_validation_hooks")]
+fn take_boot_negative_health_test() -> Option<RngHealthTest> {
+    use core::sync::atomic::fence;
+    use core::sync::atomic::Ordering;
+
+    use tsra_fw_uno_reg_soc::hsm_dtcm::HSM_DTCM_BASE;
+    use tsra_fw_uno_reg_soc::hsm_dtcm::NEGATIVE_KIND_OFFSET;
+
+    let kind = (HSM_DTCM_BASE + NEGATIVE_KIND_OFFSET) as *mut u8;
+    fence(Ordering::SeqCst);
+    // SAFETY: Byte 0 of the aligned DTCM word reserved for this request.
+    let test = RngHealthTest::from_boot_kind(unsafe { kind.read_volatile() })?;
+    // SAFETY: As above.
+    unsafe { kind.write_volatile(0) };
+    fence(Ordering::SeqCst);
+    Some(test)
+}
+
 /// Synchronous CTR_DRBG-style RNG driver.
 ///
 /// Stateless — all coordination lives in the hardware's `STATUS`
@@ -220,8 +312,45 @@ impl RngDriver {
     }
 
     /// Calibrate and enable the RNG block with default calibration values.
+    ///
+    /// With `fips_validation_hooks`, a boot negative health test forwarded by
+    /// Admin (see [`take_boot_negative_health_test`]) replaces the matching
+    /// cutoff so the hardware health test fails as soon as the RNG is enabled.
     pub fn init(&self) {
-        self.init_calibrated(&RngCalibration::DEFAULT);
+        #[cfg(feature = "fips_validation_hooks")]
+        let calibration = match take_boot_negative_health_test() {
+            Some(test) => test.apply(RngCalibration::DEFAULT),
+            None => RngCalibration::DEFAULT,
+        };
+        #[cfg(not(feature = "fips_validation_hooks"))]
+        let calibration = RngCalibration::DEFAULT;
+
+        self.init_calibrated(&calibration);
+    }
+
+    /// Force a continuous health-test failure at runtime.
+    ///
+    /// Ported from the reference `inject_rng_hw_failure`: with the RNG
+    /// disabled, lower the selected cutoff below what healthy entropy
+    /// produces, shorten the reseed interval so fresh entropy is pulled (and
+    /// health-tested) promptly, then re-enable the block. The hardware then
+    /// raises the RNG error interrupt, whose handler enters the error state.
+    /// Like the reference, the reseed wait is best effort.
+    #[cfg(feature = "fips_validation_hooks")]
+    pub fn inject_hw_failure(&self, test: RngHealthTest) {
+        Self::set_enable(false);
+        match test {
+            RngHealthTest::Apt => REGS
+                .apt_cutoff
+                .write(APT_CUTOFF::VALUE.val(APT_FAULT_CUTOFF)),
+            RngHealthTest::Rct => REGS
+                .repcnt_cutoff
+                .write(REPCNT_CUTOFF::VALUE.val(REPCNT_FAULT_CUTOFF)),
+        }
+        REGS.reseed_interval
+            .write(RESEED_INTERVAL::VALUE.val(FAULT_RESEED_INTERVAL));
+        let _ = Self::wait_till_reseed_is_set();
+        Self::set_enable(true);
     }
 
     /// Calibrate and enable the RNG block.

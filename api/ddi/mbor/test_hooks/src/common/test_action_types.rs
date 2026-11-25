@@ -232,6 +232,16 @@ pub struct DdiTestActionNegativeSelfTestReqInfo {
     pub neg_test_id: u32,
 }
 
+/// Payload for [`DdiTestAction::TriggerRngHwFailure`].
+#[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
+#[derive(Debug, Ddi)]
+#[ddi(map)]
+pub struct DdiTestActionRngHwFailureReqInfo {
+    /// RNG continuous health test to fail: `0` = APT, `1` = RCT.
+    #[ddi(id = 1)]
+    pub neg_test_id: u32,
+}
+
 /// Payload for [`DdiTestAction::PinPolicyOverride`].
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 #[derive(Debug, Ddi)]

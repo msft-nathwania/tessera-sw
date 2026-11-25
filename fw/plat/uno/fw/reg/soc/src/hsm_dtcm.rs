@@ -9,6 +9,7 @@
 pub const HSM_DTCM_BASE: u32 = 0x20000000;
 pub const CORE_RUN_STATUS_OFFSET: u32 = 0x3F800;
 pub const NEGATIVE_SELF_TEST_ID_OFFSET: u32 = 0x3F834;
+pub const NEGATIVE_KIND_OFFSET: u32 = 0x3F87C;
 pub const DTCM_IO_BUF_OFFSET: u32 = 0x2EC00;
 pub const DTCM_IO_BUF_COUNT: u32 = 33;
 pub const DTCM_IO_BUF_STRIDE: u32 = 0x600;
@@ -30,6 +31,11 @@ tock_registers::register_bitfields! [u32,
     /// 'Validation-only self-test ID to fail once; 0xFFFFFFFF means none. Admin clears it at boot and writes it at global 0x6063_F834; each core clears only the IDs of the self-tests it runs.'
     pub NEGATIVE_SELF_TEST_ID [
         ID OFFSET(0) NUMBITS(32) [],
+    ],
+    /// 'Validation-only boot RNG health-test fault (byte 0): 0 = none, 1 = repetition count (RCT), 2 = adaptive proportion (APT). Admin clears it at boot and writes the SP pre-operational request at global 0x6063_F87C; the HSM consumes it once before RNG calibration and clears it. Bytes 1-3 are reserved.'
+    pub NEGATIVE_KIND [
+        KIND OFFSET(0) NUMBITS(8) [],
+        RSVD OFFSET(8) NUMBITS(24) [],
     ]
 ];
 
@@ -45,7 +51,9 @@ pub mod regs {
             (0x3f800 => pub core_run_status: crate::RW<u32, super::CORE_RUN_STATUS::Register>),
             (0x3f804 => _reserved2),
             (0x3f834 => pub negative_self_test_id: crate::RW<u32, super::NEGATIVE_SELF_TEST_ID::Register>),
-            (0x3f838 => @END),
+            (0x3f838 => _reserved3),
+            (0x3f87c => pub negative_kind: crate::RW<u32, super::NEGATIVE_KIND::Register>),
+            (0x3f880 => @END),
         }
     }
 }

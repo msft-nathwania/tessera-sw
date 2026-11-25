@@ -27,6 +27,8 @@
 //! - [`test_action`] — the `TestAction` (`DdiOp` 2004) handler.
 //! - [`get_priv_key`] / [`raw_key_import`] — FIPS-validation action handlers.
 //! - [`get_rng`] — the `GetRng` FIPS-validation action handler.
+//! - [`trigger_rng_hw_failure`] — the RNG health-test fault injection
+//!   FIPS-validation action handler.
 //!
 //! # Test hooks are in-session commands
 //!
@@ -73,6 +75,8 @@ mod raw_key_import;
 mod test_action;
 #[cfg(feature = "tsra_test_hooks")]
 mod trigger_crash;
+#[cfg(feature = "fips_validation_hooks")]
+mod trigger_rng_hw_failure;
 
 use common::ReqHdr;
 use tsra_fw_ddi_mbor::MborDecode;
